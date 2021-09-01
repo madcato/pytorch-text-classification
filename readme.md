@@ -14,6 +14,9 @@ This is a projecto to play with pytorch. It's based in this PyTorch Tutorial: ht
 ## Tasks
 
 - [ ] Optimize GPU utilisation (was 10%)
+- [ ] Try other optimizers
+- [ ] Try other loss functions
+- [ ] Change model
 - [ ] Use GloVe embeddings
 
 ## Run

@@ -7,6 +7,7 @@ from torch import nn
 from torch.utils.data.dataset import random_split
 from torchtext.data.functional import to_map_style_dataset
 import time
+from configurations import configs
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # device = "cpu"
@@ -87,7 +88,7 @@ print(model)
 
 # Define functions to train the model and evaluate results
 
-def train(dataloader):
+def train(dataloader, optimizer, criterion, epoch, verbose):
     model.train()
     total_acc, total_count = 0, 0
     log_interval = 500
@@ -102,7 +103,7 @@ def train(dataloader):
         optimizer.step()
         total_acc += (predicted_label.argmax(1) == label).sum().item()
         total_count += label.size(0)
-        if idx % log_interval == 0 and idx > 0:
+        if idx % log_interval == 0 and idx > 0 and verbose:
             elapsed = time.time() - start_time
             print('| epoch {:3d} | {:5d}/{:5d} batches '
                   '| accuracy {:8.3f}'.format(epoch, idx, len(dataloader),
@@ -110,7 +111,7 @@ def train(dataloader):
             total_acc, total_count = 0, 0
             start_time = time.time()
 
-def evaluate(dataloader):
+def evaluate(dataloader, criterion):
     model.eval()
     total_acc, total_count = 0, 0
 
@@ -125,51 +126,66 @@ def evaluate(dataloader):
 
 # Split the dataset and run the model
 
-# Hyperparameters
-EPOCHS = 10 # epoch
-LR = 5  # learning rate
-BATCH_SIZE = 8 # batch size for training
+def start_train(batch_size, epochs, lr, verbose):
+    BATCH_SIZE=batch_size
+    EPOCHS=epochs
+    LR=lr
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(model.parameters(), lr=LR)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.1)
+    total_accu = None
+    train_iter, test_iter = AG_NEWS()
+    train_dataset = to_map_style_dataset(train_iter)
+    test_dataset = to_map_style_dataset(test_iter)
+    num_train = int(len(train_dataset) * 0.95)
+    split_train_, split_valid_ = \
+        random_split(train_dataset, [num_train, len(train_dataset) - num_train])
 
-criterion = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=LR)
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.1)
-total_accu = None
-train_iter, test_iter = AG_NEWS()
-train_dataset = to_map_style_dataset(train_iter)
-test_dataset = to_map_style_dataset(test_iter)
-num_train = int(len(train_dataset) * 0.95)
-split_train_, split_valid_ = \
-    random_split(train_dataset, [num_train, len(train_dataset) - num_train])
+    train_dataloader = DataLoader(split_train_, batch_size=BATCH_SIZE,
+                                shuffle=True, collate_fn=collate_batch)
+    valid_dataloader = DataLoader(split_valid_, batch_size=BATCH_SIZE,
+                                shuffle=True, collate_fn=collate_batch)
+    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE,
+                                shuffle=True, collate_fn=collate_batch)
+    
+    train_start_time = time.time()
+    for epoch in range(1, EPOCHS + 1):
+        epoch_start_time = time.time()
+        train(train_dataloader, optimizer, criterion, epoch, verbose)
+        accu_val = evaluate(valid_dataloader, criterion)
+        if total_accu is not None and total_accu > accu_val:
+            scheduler.step()
+        else:
+            total_accu = accu_val
+        
+        print('-' * 59)
+        print('| end of epoch {:3d} | time: {:5.2f}s | '
+            'valid accuracy {:8.3f} '.format(epoch,
+                                            time.time() - epoch_start_time,
+                                            accu_val))
+        print('-' * 59)
 
-train_dataloader = DataLoader(split_train_, batch_size=BATCH_SIZE,
-                              shuffle=True, collate_fn=collate_batch)
-valid_dataloader = DataLoader(split_valid_, batch_size=BATCH_SIZE,
-                              shuffle=True, collate_fn=collate_batch)
-test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE,
-                             shuffle=True, collate_fn=collate_batch)
+    print("Whole train time: {:5.2f}s".format(time.time() - train_start_time))
 
-train_start_time = time.time()
-for epoch in range(1, EPOCHS + 1):
-    epoch_start_time = time.time()
-    train(train_dataloader)
-    accu_val = evaluate(valid_dataloader)
-    if total_accu is not None and total_accu > accu_val:
-      scheduler.step()
-    else:
-       total_accu = accu_val
-    print('-' * 59)
-    print('| end of epoch {:3d} | time: {:5.2f}s | '
-          'valid accuracy {:8.3f} '.format(epoch,
-                                           time.time() - epoch_start_time,
-                                           accu_val))
-    print('-' * 59)
+    print('Checking the results of test dataset.')
+    accu_test = evaluate(test_dataloader, criterion)
+    print('test accuracy {:8.3f}'.format(accu_test))
 
-print("Whole train time: {:5.2f}s".format(time.time() - train_start_time))
 
 ## GPU: GTX 1660 Ti          => Whole train time: 41.31s
 ## CPU: i9 9900K 8 threads   => Whole train time: 63.44s
 ## CPU: i9 9900K 16 threads  => Whole train time: 84.02s
 
-print('Checking the results of test dataset.')
-accu_test = evaluate(test_dataloader)
-print('test accuracy {:8.3f}'.format(accu_test))
+
+for conf in configs:
+    batch_size = conf["BATCH_SIZE"]
+    epochs = conf["EPOCHS"]
+    lr = conf["LR"]
+    verbose = conf["VERBOSE"]
+    print('')
+    print('')
+    print('*' * 59)
+    print(conf)
+    print('')
+    start_train(batch_size, epochs, lr, verbose)
+    print('*' * 59)
